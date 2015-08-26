@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+    .label, #ModelLabel {
+        text-align: center;
+        vertical-align: middle;
+        width: 200px;
+        height: 20px;
+        padding: 5px;
+        fill: #fff;
+        font-size: 12px;
+        background: #1D304B;
+        box-shadow: 4px 4px 10px rgba(247, 251, 255, 0.4);
+        border: 2px;
+        border-radius: 8px;
+        pointer-events: none;
+    }
+
+    #states {
+        stroke: #fff;
+        fill-opacity: 0.5;
+        stroke-width: 1px;
+        stroke-opacity: 1;
+    }
+
+    .bubble {
+        fill: #A5BCE3;
+        fill-opacity: 1;
+        stroke: #6184BE;
+        stroke-width: 2px;
+    }
+
+
+
+    div.tooltip {
+        position: absolute;
+        text-align: center;
+        width: 200px;
+        height: 30px;
+        padding: 2px;
+        color:white;
+        font: 12px sans-serif;
+        background: #1D304B;
+        border:  1px solid #FF9D00;
+        border-radius: 8px;
+        pointer-events: none;
+        fill-opacity: 0.6;
+    }
+
+</style>
+<body style="background:#1D304B">
+
+<table>
+    <tr><th style="font-size:22px;left:200px; position:absolute; color:#FF9D00">Industry Demand</th></tr>
+    <tr>
+        <th>
+            <svg class="label" style="position:absolute;top:50px; left:177px" id="makeLabel">
+                <text id="ModelLabel" text-anchor="inherit" x="20" y="15" font-family="sans-serif" font-size="12px" fill="#000" > Loading.. Please wait. </text>
+            </svg>
+        </th>
+        <th><img id="playButton" style="position:absolute;top:50px; left:400px; cursor:pointer"/></th>
+    </tr>
+</table>
+
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/queue-async/1.0.7/queue.min.js"></script>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.3/jquery.min.js"></script>
+
+
+<script>
+
+    var modelMap = {};
+    var zipMap = {};
+    var dataset = [];
+    var test = [];
+    var numberOfMakeModels = 0;
+    var makeModel = null;
+    var datasetToShow = [];
+    var circle;
+    var datasetFilteredByZip = [];
+    var maxValue = 0;
+    var NewModelMap = {};
+    var clicked = false;
+    var setIntHandler;
+
+
+    var width = 650,
+            height = 550;
+
+    var projection = d3.geo.albersUsa()
+            .scale(900)
+            .translate([width / 2, height / 2]);
+
+    var path = d3.geo.path()
+            .projection(projection);
+
+    var svg = d3.select("body").append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .style("fill","none");
+
+    function circleSize(d){
+        return Math.sqrt(.3 * Math.abs(d))>10?10:Math.sqrt(.3 * Math.abs(d));
+    }
+
+    var radius = d3.scale.sqrt()
+            .domain([1, 200])
+            .range([0, 3]);
+
+    var div = d3.select("body").append("div")
+            .attr("class", "tooltip")
+            .style("opacity", 0);
+
+    var shadow = svg.append("defs").append("filter")
+            .attr("id","dropshadow")
+            .attr("width", "130%")
+            .attr("height", "130%");
+
+    shadow.append("feOffset")
+
+            .attr("in", "SourceGraphic")
+            .attr("dx", 2)
+            .attr("dy", 2)
+            .attr("result", "offset");
+
+    shadow.append("feGaussianBlur")
+            .attr("in", "offset")
+            .attr("result", "blur")
+            .attr("stdDeviation", 2);
+
+    shadow.append("feBlend")
+            .attr("in", "SourceGraphic")
+            .attr("in2", "offsetBlur")
+            .attr("mode", "multiply");
+
+
+    svg.append("rect")
+            .attr("class", "background")
+            .attr("width", width)
+            .attr("height", height);
+
+    var g = svg.append("g");
+    var maxValue = 0;
+
+
+    function NextMakeModel(){
+
+        if(makeModel == null || makeModel == undefined){
+            makeModel = NewModelMap[Object.keys(NewModelMap)[0]];
+        }
+        else{
+            for(var i = 0;i<Object.keys(NewModelMap).length;i++) {
+                if (NewModelMap[Object.keys(NewModelMap)[i]] == makeModel) {
+                    makeModel = NewModelMap[Object.keys(NewModelMap)[i + 1]];
+                    return;
+                }
+            }
+        }
+    }
+
+    function NextDataset(){
+        maxValue = 0;
+        datasetToShow = [];
+        datasetFilteredByZip = [];
+        for(var i in dataset){
+            if(dataset[i].model == makeModel){
+                datasetToShow.push(dataset[i]);
+            }
+
+            if(maxValue<dataset[i].supply){
+                maxValue = dataset[i].supply;
+            }
+        }
+
+        for(var filter in datasetToShow){
+
+            if(!(datasetToShow[filter].zip in datasetFilteredByZip)){
+                datasetFilteredByZip.push({model:datasetToShow[filter].model, demand:datasetToShow[filter].demand, projection:projection([datasetToShow[filter].long,datasetToShow[filter].lat]),city:datasetToShow[filter].city});
+            }
+        }
+
+    }
+
+    queue()
+            .defer(d3.json,"us.json")
+            .await(function (error, us) {
+
+                $("#ModelLabel").text("Loading... Please wait");
+
+
+                g.append("g")
+                        .attr("id", "states")
+                        .selectAll("path")
+                        .data(topojson.feature(us, us.objects.states).features)
+                        .enter().append("path")
+                        .attr("d", path)
+                        .attr("id", function(d){return d.id})
+                        .style("filter", "url(#dropshadow)")
+                        .style("fill","#263F6B");
+            });
+
+    queue()
+            .defer(d3.csv, "bi_dw_lu_model.csv", function(data) {
+                if(!(data.MODEL_ID in modelMap)){
+                    modelMap[data.MODEL_ID] = data.make_model_desc;
+                }
+            })
+            .defer(d3.csv, "zip3latlong.csv", function(zips){
+                if(!(zips.zip in zipMap)){
+                    zipMap[zips.zip] = {lat:zips.lat, long:zips.long, city:zips.city};
+                }
+            })
+            .defer(d3.tsv, "AggregatedDemand.tsv", function(demand){
+
+                if(zipMap[+demand.zip.substring(0,3)]!=null) {
+                    dataset.push({
+                        model: modelMap[demand.model],
+                        demand: demand.demand100,
+                        zip: +demand.zip.substring(0, 3),
+                        lat: zipMap[+demand.zip.substring(0, 3)].lat,
+                        long: zipMap[+demand.zip.substring(0, 3)].long,
+                        city:zipMap[+demand.zip.substring(0, 3)].city
+                    });
+
+                    if(!(demand.model in NewModelMap)){
+                        NewModelMap[demand.model] = modelMap[demand.model];
+                    }
+                }
+
+            })
+            .await(function(){
+
+                    NextMakeModel();
+                    NextDataset();
+
+                    $("#playButton").attr("src","play_button.png");
+                    $("#ModelLabel").text(makeModel);
+
+
+                svg.selectAll("circle")
+                        .data(datasetFilteredByZip)
+                        .enter()
+                        .append("circle")
+                            .attr("r", function (d) {return circleSize(d.demand);})
+                            .attr("cx", function(d){return d.projection[0]})
+                            .attr("cy", function(d){return d.projection[1]})
+                            .attr("class", "bubble")
+                            .on("mouseover", function(d) {
+                            div.transition()
+                                    .duration(200)
+                                    .style("opacity", .9);
+                            div.html(d.city+"<br>Demand "+d.demand)
+                                    .style("left", (d3.event.pageX) + "px")
+                                    .style("top", (d3.event.pageY - 28) + "px");
+                            d3.select(this).style("stroke-width","2px")
+                                    .style("fill-opacity",0.5);
+                            })
+                            .on("mouseout", function() {
+                            div.transition()
+                                    .duration(500)
+                                    .style("opacity", 0);
+                            d3.select(this).style("stroke-width","1px")
+                                    .style("fill-opacity",1);
+                            });
+                $("#playButton").trigger("click");
+            });
+
+    $("#playButton").click(function() {
+
+        if (clicked) {
+            $("#playButton").attr("src","play_button.png");
+            clicked=false;
+            clearInterval(setIntHandler);
+        }
+        else {
+            $("#playButton").attr("src","pause_button.png");
+            clicked = true;
+
+            NextMakeModel();
+            NextDataset();
+
+            setIntHandler = setInterval(Interval, 10);
+            clearInterval(setIntHandler);
+            setIntHandler = setInterval(Interval, 3000);
+        }
+    });
+
+    function Interval() {
+
+
+        interval = 3000;
+
+        NextMakeModel();
+        NextDataset();
+
+        var circles = svg.selectAll("circle")
+                .data(datasetFilteredByZip);
+
+        circles.exit().remove();
+
+        $("#ModelLabel").text(makeModel);
+
+
+        circles.data(datasetFilteredByZip)
+                .enter()
+                .append("circle")
+                .classed("bubble",true)
+                .on("mouseover", function(d) {
+                    div.transition()
+                            .duration(200)
+                            .style("opacity", .9);
+                    div.html(d.city+", "+d.state+"<br>Demand "+d.demand)
+                            .style("left", (d3.event.pageX) + "px")
+                            .style("top", (d3.event.pageY - 28) + "px");
+                    d3.select(this).style("stroke-width","2px")
+                            .style("fill-opacity",0.5);
+                })
+                .on("mouseout", function() {
+                    div.transition()
+                            .duration(500)
+                            .style("opacity", 0);
+                    d3.select(this).style("stroke-width","1px")
+                            .style("fill-opacity",1);
+                });
+
+
+        circles
+                .transition()
+                .ease("linear")
+                .delay(100)
+                .duration(1000)
+                .attr("cx", function(d){return d.projection[0]})
+                .attr("cy", function(d){return d.projection[1]})
+                .attr("r", function(d){return circleSize(d.demand)});
+    }
+
+</script>
+
+
