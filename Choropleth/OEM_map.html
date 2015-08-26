@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+
+    /* */
+    #states {
+        stroke: #A6A6A6;
+        stroke-width: 0.5px;
+    }
+
+    /* */
+    #states .active {
+        fill: none;
+    }
+    
+    /* Style used to quantize states to corresponding colors */
+    .q0 { fill: rgb(172,52,68); }
+    .q1 { fill: rgb(223,101,117); }
+    .q2 { fill: rgb(228,186,192); }
+    .q3 { fill: rgb(243,243,243); }
+    .q4 { fill: rgb(202,213,228); }
+    .q5 { fill: rgb(110,139,177); }
+    .q6 { fill: rgb(17,50,95); }
+
+
+    /* Style used to hide(unhide) states(counties) on clicking(unclicking) a state */
+    .hideStates{
+        fill:#FFFFFF;
+        stroke:#FFFFFF;
+        cursor:default;
+    }
+
+</style>
+<body style="background: #FFFFFF">
+<script src="http://d3js.org/d3.v3.min.js"></script>
+<script src="http://d3js.org/topojson.v1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/queue-async/1.0.7/queue.min.js"></script>
+
+<script>
+    var percentages = [];
+    for(var i = 0; i < 51; i++) {
+        percentages.push(Math.round(Math.random() * 15));
+    }
+
+    var active = d3.select(null);
+
+    var quantize = d3.scale.quantize()
+            .domain([-5.5, 5.5])
+            .range(d3.range(7).map(function(i) { return "q" + i; }));
+
+    var countyQuantize = d3.scale.quantize()
+            .domain([0, 0.15])
+            .range(d3.range(7).map(function(i) { return "q" + i; }));
+
+    var rateById = d3.map();
+    var countyRateById = d3.map();
+    var percentageById = d3.map();
+
+    var width = 1344,
+            height = 700,
+            centered;
+
+    var projection = d3.geo.albersUsa()
+            .scale(1500)
+            .translate([width / 2, height / 2]);
+
+
+    var zoom = d3.behavior.zoom()
+            .translate([0, 0])
+            .scale(1)
+            .scaleExtent([1, 8])
+            .on("zoom", zoomed);
+
+    var path = d3.geo.path()
+            .projection(projection);
+
+    var svg = d3.select("body").append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .on("click", stopped, true);
+
+    var shadow = svg.append("defs").append("filter")
+            .attr("id","dropshadow")
+            .attr("width", "130%")
+            .attr("height", "130%");
+
+    shadow.append("feOffset")
+
+            .attr("in", "SourceGraphic")
+            .attr("dx", 0)
+            .attr("dy", 0)
+            .attr("result", "offset");
+
+//    shadow.append("feGaussianBlur")
+//            .attr("in", "offset")
+//            .attr("result", "blur")
+//            .attr("stdDeviation", 5);
+
+    shadow.append("feBlend")
+            .attr("in", "SourceGraphic")
+            .attr("mode", "screen");
+
+    svg.append("rect")
+            .style("fill", "#FFFFFF")
+            .attr("width", width)
+            .attr("height", height);
+
+    var g = svg.append("g");
+
+
+    svg
+            .call(zoom)
+            .on("click", null);
+
+    queue()
+            .defer(d3.json,"us.json").await(function(error, us) {
+
+                g.append("g")
+                        .attr("id", "counties")
+                        .selectAll("path")
+                        .data(topojson.feature(us, us.objects.counties).features)
+                        .enter().append("path")
+                        .attr("d", path)
+                        .attr("class", function(d) { return (countyQuantize(countyRateById.get(d.id)))!=null?countyQuantize(countyRateById.get(d.id)):"redCounty";})
+                        .attr("id" ,function(d) { return d.id })
+                        .on("click", countyclicked);
+
+                var stateGroup = g.append("g")
+                        .attr("id", "states");
+
+                stateGroup.selectAll("path")
+                        .data(topojson.feature(us, us.objects.states).features)
+                        .enter().append("path")
+                        .attr("d", path)
+                        .attr("class", function(d) { return quantize(percentageById.get(d.id)); })
+                        .attr("id" ,function(d) { return d.id })
+                        .on("click", clicked)
+                        .on('mouseover', function(d, i) {
+                            d3.select(this)
+                                    .style("cursor", "pointer")
+                                    .style("filter", "url(#dropshadow)");
+                        })
+                        .on('mouseout', function(d, i) {
+                            d3.select(this)
+                                    .style("filter", "none");
+                        });
+
+                stateGroup.selectAll("text")
+                        .data(topojson.feature(us, us.objects.states).features)
+                        .enter()
+                        .append("svg:text")
+                        .text(function(d){
+                            return percentageById.get(d.id)+"%";
+                        })
+                        .attr("x", function(d){
+                            return path.centroid(d)[0];
+                        })
+                        .attr("y", function(d){
+                            return  path.centroid(d)[1];
+                        })
+                        .attr("text-anchor","middle")
+                        .attr('font-size','10pt')
+                        .style({"stroke": "white", "stroke-width": "0.5px", "fill": "white", "font-family": "Helvetica Neue", "font-weight": 300});
+
+            })
+            .defer(d3.csv, "demand.csv", function(d) { rateById.set(d.id, +d.demand); percentageById.set(d.id, d.percent)})
+            .defer(d3.csv, "county_demand.csv", function(d) {countyRateById.set(d.id, +d.demand); });
+
+
+
+    function clicked(d) {
+
+        //d3.event.preventDefault();
+        //alert(d.id);
+
+        //when state is clicked a second time, call function to reset(zoom out)
+        if (active.node() === this) return countyclicked(d);
+        //make all states' active class as false
+        active.classed("active", false);
+        //make only clicked state as active
+        active = d3.select(this).classed("active", true);
+
+
+        d3.selectAll("#states path").each(function(d, i) {
+            d3.selectAll("text").style("display", "none");
+            if(this.id!=active[0][0].id) {
+                d3.select(this).classed("hideStates", "true");
+                d3.select(this).on('click', null);
+                d3.select(this).on('mouseover', null);
+            }
+        });
+
+        //variables to determine the centre of the state that's currently selected
+        var bounds = path.bounds(d),
+                dx = bounds[1][0] - bounds[0][0],
+                dy = bounds[1][1] - bounds[0][1],
+                x = (bounds[0][0] + bounds[1][0]) / 2,
+                y = (bounds[0][1] + bounds[1][1]) / 2,
+                scale = .9 / Math.max(dx / width, dy / height),
+                translate = [width / 2 - scale * x, height / 2 - scale * y];
+
+        svg.transition()
+                .duration(750)
+                .call(zoom.translate(translate).scale(scale).event);
+    }
+
+    function countyclicked(d) {
+
+
+        //d3.event.preventDefault();
+
+        active.classed("active", false);
+
+        active = d3.select(this).classed("active", true);
+
+        d3.selectAll("text").style("display", "inline");
+
+        d3.selectAll("#states path").each(function (d, i) {
+            if (d3.select(this).classed("hideStates")) {
+                d3.select(this).classed("hideStates", false);
+                d3.select(this).on('click', clicked);
+                d3.select(this).on('mouseover', function (d, i) {
+                    d3.select(this)
+                            .style("cursor", "pointer")
+                            .style("filter", "url(#dropshadow)");
+                });
+            }
+        });
+
+
+        active = d3.select(null);
+
+        svg.transition()
+                .duration(750)
+                .call(zoom.translate([0, 0]).scale(1).event);
+    }
+
+
+    function zoomed() {
+        g.attr("transform", "translate(" + d3.event.translate + ")scale(" + d3.event.scale + ")");
+    }
+
+    function stopped() {
+        if (d3.event.defaultPrevented) d3.event.stopPropagation();
+    }
+    //d3.select(self.frameElement).style("height", height + "px");
+
+</script>
+
